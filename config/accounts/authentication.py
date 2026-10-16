@@ -1,4 +1,3 @@
-from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -16,7 +15,7 @@ class SessionJWTAuthentication(JWTAuthentication):
         session_id = validated_token.get("session_id")
 
         if not session_id:
-            return result
+            raise AuthenticationFailed("Session is no longer valid.")
 
         try:
             session = UserSession.objects.get(

@@ -9,3 +9,5 @@ tzdata==2026.5
 djangorestframework_simplejwt==5.5.1
 PyJWT==2.15.1
 drf-spectacular[sidecar]==0.30.0
+pytest==9.1.1
+pytest-django==4.14.0

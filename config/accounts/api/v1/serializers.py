@@ -149,20 +149,28 @@ class SessionRefreshTokenSerializer(TokenRefreshSerializer):
         session_id = refresh.get("session_id")
 
         if not session_id:
-            return super().validate(attrs)
+            raise AuthenticationFailed("Session is no longer valid.")
 
         try:
-            session = UserSession.objects.get(id=session_id)
+            session = UserSession.objects.get(
+                id=session_id,
+                user_id=refresh.get("user_id"),
+            )
         except UserSession.DoesNotExist:
             raise AuthenticationFailed("Session is no longer valid.")
 
-        if not session.is_active:
+        if (
+            not session.is_active
+            or session.refresh_token_jti != str(refresh["jti"])
+        ):
             raise AuthenticationFailed("Session is no longer valid.")
+
+        data = super().validate(attrs)
 
         session.last_seen_at = timezone.now()
         session.save(update_fields=["last_seen_at"])
 
-        return super().validate(attrs)
+        return data
 
 
 class CurrentUserSerializer(serializers.ModelSerializer):

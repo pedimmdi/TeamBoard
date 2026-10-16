@@ -1,3 +1,4 @@
+import uuid
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core.cache import cache
@@ -9,7 +10,7 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.test import APITestCase
 from urllib.parse import parse_qs, urlparse
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from .models import Profile, UserSession
 
 User = get_user_model()
@@ -198,11 +199,23 @@ class JWTAuthenticationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_refresh_returns_new_access_token(self):
-        refresh = RefreshToken.for_user(self.user)
+        login_response = self.client.post(
+            self.token_url,
+            {
+                "email": self.user.email,
+                "password": self.password,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            login_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         response = self.client.post(
             self.refresh_url,
-            {"refresh": str(refresh)},
+            {"refresh": login_response.data["refresh"]},
             format="json",
         )
 
@@ -237,6 +250,7 @@ class AccountEndpointTests(APITestCase):
         self.user = User.objects.create_user(
             email="account@example.com",
             password=self.password,
+            is_email_verified=True,
         )
 
     def test_me_requires_authentication(self):
@@ -248,9 +262,24 @@ class AccountEndpointTests(APITestCase):
         )
 
     def test_me_returns_authenticated_user(self):
-        refresh = RefreshToken.for_user(self.user)
+        login_response = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": self.user.email,
+                "password": self.password,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            login_response.status_code,
+            status.HTTP_200_OK,
+        )
+
         self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
+            HTTP_AUTHORIZATION=(
+                f"Bearer {login_response.data['access']}"
+            )
         )
 
         response = self.client.get(self.me_url)
@@ -261,16 +290,30 @@ class AccountEndpointTests(APITestCase):
         self.assertNotIn("password", response.data)
 
     def test_logout_blacklists_refresh_token(self):
-        refresh = RefreshToken.for_user(self.user)
-        refresh_value = str(refresh)
+        login_response = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": self.user.email,
+                "password": self.password,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            login_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        access_token = login_response.data["access"]
+        refresh_token = login_response.data["refresh"]
 
         self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
+            HTTP_AUTHORIZATION=f"Bearer {access_token}"
         )
 
         response = self.client.post(
             self.logout_url,
-            {"refresh": refresh_value},
+            {"refresh": refresh_token},
             format="json",
         )
 
@@ -278,7 +321,7 @@ class AccountEndpointTests(APITestCase):
 
         refresh_response = self.client.post(
             "/api/v1/accounts/refresh/",
-            {"refresh": refresh_value},
+            {"refresh": refresh_token},
             format="json",
         )
 
@@ -291,17 +334,42 @@ class AccountEndpointTests(APITestCase):
         another_user = User.objects.create_user(
             email="another@example.com",
             password="Another-strong-2026!",
+            is_email_verified=True,
         )
-        another_refresh = RefreshToken.for_user(another_user)
 
-        own_refresh = RefreshToken.for_user(self.user)
+        own_login = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": self.user.email,
+                "password": self.password,
+            },
+            format="json",
+        )
+
+        another_login = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": another_user.email,
+                "password": "Another-strong-2026!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(own_login.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            another_login.status_code,
+            status.HTTP_200_OK,
+        )
+
         self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {own_refresh.access_token}"
+            HTTP_AUTHORIZATION=(
+                f"Bearer {own_login.data['access']}"
+            )
         )
 
         response = self.client.post(
             self.logout_url,
-            {"refresh": str(another_refresh)},
+            {"refresh": another_login.data["refresh"]},
             format="json",
         )
 
@@ -309,6 +377,7 @@ class AccountEndpointTests(APITestCase):
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
         )
+
 
 
 @override_settings(
@@ -1082,5 +1151,49 @@ class SessionManagementAPITests(APITestCase):
 
         self.assertEqual(
             me_response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_access_token_without_session_id_is_rejected(self):
+        tokens = self.login()
+        access_token = AccessToken(tokens["access"])
+        del access_token["session_id"]
+
+        self.authenticate_with(str(access_token))
+
+        response = self.client.get(self.me_url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_access_token_with_invalid_session_id_is_rejected(self):
+        tokens = self.login()
+        access_token = AccessToken(tokens["access"])
+        access_token["session_id"] = str(uuid.uuid4())
+
+        self.authenticate_with(str(access_token))
+
+        response = self.client.get(self.me_url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_refresh_token_without_session_id_is_rejected(self):
+        tokens = self.login()
+        refresh_token = RefreshToken(tokens["refresh"])
+        del refresh_token["session_id"]
+
+        response = self.client.post(
+            "/api/v1/accounts/refresh/",
+            {"refresh": str(refresh_token)},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
             status.HTTP_401_UNAUTHORIZED,
         )
