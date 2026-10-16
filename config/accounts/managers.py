@@ -4,6 +4,14 @@ from django.contrib.auth.base_user import BaseUserManager
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
+    @staticmethod
+    def normalize_email(email):
+        if not isinstance(email, str):
+            return email
+
+        email = BaseUserManager.normalize_email(email.strip())
+        return email.casefold()
+
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError("Email is required.")

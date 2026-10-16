@@ -79,12 +79,14 @@ class RegisterSerializer(serializers.ModelSerializer):
                 "If you did not create this account, you can ignore this email."
             )
 
-            send_mail(
-                subject="Verify your TeamBoard email address",
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
+            transaction.on_commit(
+                lambda: send_mail(
+                    subject="Verify your TeamBoard email address",
+                    message=message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
             )
 
         return user
@@ -137,11 +139,6 @@ class LoginSerializer(TokenObtainPairSerializer):
     def _get_client_ip(self, request):
         if request is None:
             return None
-
-        forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
 
         return request.META.get("REMOTE_ADDR")
 
@@ -494,6 +491,6 @@ class UserSessionSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_is_current(self, obj):
+    def get_is_current(self, obj) -> bool:
         current_session_id = self.context.get("current_session_id")
         return str(obj.id) == str(current_session_id)

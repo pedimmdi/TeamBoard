@@ -2,7 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from accounts.models import UserSession
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, status, serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -14,7 +14,12 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
-
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiParameter,
+    OpenApiResponse,
+    inline_serializer,
+)
 from .serializers import (
     LoginSerializer,
     SessionRefreshTokenSerializer,
@@ -85,6 +90,28 @@ class ChangePasswordView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "password_change"
 
+    @extend_schema(
+        summary="Change password",
+        description=(
+            "Changes the authenticated user's password. "
+            "Existing sessions are invalidated after a successful change."
+        ),
+        request=ChangePasswordSerializer,
+        responses={
+            200: inline_serializer(
+                name="ChangePasswordResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid request data or current password."
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials are missing or invalid."
+            ),
+        },
+    )
     def post(self, request):
         serializer = ChangePasswordSerializer(
             data=request.data,
@@ -111,6 +138,25 @@ class LogoutView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "logout"
 
+    @extend_schema(
+        summary="Log out",
+        description="Logs out the authenticated session.",
+        request=LogoutSerializer,
+        responses={
+            200: inline_serializer(
+                name="LogoutResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid logout request."
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials are missing or invalid."
+            ),
+        },
+    )
     def post(self, request):
         serializer = LogoutSerializer(
             data=request.data,
@@ -129,6 +175,28 @@ class PasswordResetRequestView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "password_reset"
 
+    @extend_schema(
+        summary="Request password reset",
+        description=(
+            "Requests password reset instructions. "
+            "The response does not reveal whether the email exists."
+        ),
+        request=PasswordResetRequestSerializer,
+        responses={
+            200: inline_serializer(
+                name="PasswordResetRequestResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid request data."
+            ),
+            429: OpenApiResponse(
+                description="Too many requests."
+            ),
+        },
+    )
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -150,6 +218,28 @@ class PasswordResetConfirmView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "password_reset_confirm"
 
+    @extend_schema(
+        summary="Confirm password reset",
+        description=(
+            "Resets the password using a valid password-reset token "
+            "and invalidates the user's existing sessions."
+        ),
+        request=PasswordResetConfirmSerializer,
+        responses={
+            200: inline_serializer(
+                name="PasswordResetConfirmResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid, expired, or incomplete reset data."
+            ),
+            429: OpenApiResponse(
+                description="Too many requests."
+            ),
+        },
+    )
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -173,6 +263,40 @@ class EmailVerificationView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "email_verification"
 
+    @extend_schema(
+        summary="Verify email address",
+        description="Verifies an email address using the supplied verification token.",
+        parameters=[
+            OpenApiParameter(
+                name="uid",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Encoded user identifier.",
+            ),
+            OpenApiParameter(
+                name="token",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Email verification token.",
+            ),
+        ],
+        responses={
+            200: inline_serializer(
+                name="EmailVerificationResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid or expired verification data."
+            ),
+            429: OpenApiResponse(
+                description="Too many requests."
+            ),
+        },
+    )
     def get(self, request):
         serializer = EmailVerificationSerializer(
             data=request.query_params
@@ -191,6 +315,28 @@ class ResendVerificationEmailView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "email_resend"
 
+    @extend_schema(
+        summary="Resend email verification",
+        description=(
+            "Requests a new verification email without revealing "
+            "whether the email address is registered or already verified."
+        ),
+        request=ResendVerificationEmailSerializer,
+        responses={
+            200: inline_serializer(
+                name="ResendVerificationEmailResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="Invalid request data."
+            ),
+            429: OpenApiResponse(
+                description="Too many requests."
+            ),
+        },
+    )
     def post(self, request):
         serializer = ResendVerificationEmailSerializer(
             data=request.data
@@ -229,6 +375,33 @@ class SessionListView(generics.ListAPIView):
 class SessionRevokeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        summary="Revoke a session",
+        description="Revokes a session belonging to the authenticated user.",
+        parameters=[
+            OpenApiParameter(
+                name="session_id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                required=True,
+                description="ID of the session to revoke.",
+            ),
+        ],
+        responses={
+            200: inline_serializer(
+                name="SessionRevokeResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                },
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials are missing or invalid."
+            ),
+            404: OpenApiResponse(
+                description="The session does not exist or does not belong to the user."
+            ),
+        },
+    )
     @transaction.atomic
     def delete(self, request, session_id):
         session = UserSession.objects.filter(
@@ -269,6 +442,51 @@ class SessionRevokeView(APIView):
 class RevokeOtherSessionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        summary="Revoke other sessions",
+        description=(
+            "Revokes the authenticated user's other active sessions "
+            "while keeping the current session active."
+        ),
+        request=None,
+        responses={
+            200: inline_serializer(
+                name="RevokeOtherSessionsResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                    "revoked_count": serializers.IntegerField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="The current token is not associated with a session."
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials are missing or invalid."
+            ),
+        },
+    )
+    @extend_schema(
+        summary="Revoke other sessions",
+        description=(
+            "Revokes the authenticated user's other active sessions "
+            "while keeping the current session active."
+        ),
+        responses={
+            200: inline_serializer(
+                name="RevokeOtherSessionsResponse",
+                fields={
+                    "detail": serializers.CharField(),
+                    "revoked_count": serializers.IntegerField(),
+                },
+            ),
+            400: OpenApiResponse(
+                description="The current token is not associated with a session."
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials are missing or invalid."
+            ),
+        },
+    )
     @transaction.atomic
     def post(self, request):
         current_session_id = request.auth.get("session_id")

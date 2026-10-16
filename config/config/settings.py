@@ -44,6 +44,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
+    "drf_spectacular",
+    "drf_spectacular_sidecar",
     "accounts.apps.AccountsConfig",
 ]
 
@@ -155,6 +157,7 @@ REST_FRAMEWORK = {
         "email_verification": "10/min",
         "email_resend": "5/min",
     },
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 SIMPLE_JWT = {
@@ -177,3 +180,25 @@ FRONTEND_URL = env(
     "FRONTEND_URL",
     default="http://localhost:3000",
 )
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "TeamBoard API",
+    "DESCRIPTION": (
+        "REST API documentation for TeamBoard, "
+        "including account management and authentication."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            },
+        },
+    },
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
+}

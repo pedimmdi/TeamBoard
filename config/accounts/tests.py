@@ -57,6 +57,14 @@ class UserModelTests(TestCase):
                 password="Another-password-2026!",
             )
 
+    def test_email_is_normalized_when_creating_user(self):
+        user = User.objects.create_user(
+            email="  Test.User@EXAMPLE.COM  ",
+            password="Test-password-2026!",
+        )
+
+        self.assertEqual(user.email, "test.user@example.com")
+
 
 class RegisterAPITests(APITestCase):
     url = "/api/v1/accounts/register/"
@@ -129,6 +137,27 @@ class RegisterAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_register_rejects_duplicate_email_case_insensitively(self):
+        User.objects.create_user(
+            email="existing@example.com",
+            password="Another-strong-2026!",
+        )
+
+        response = self.client.post(
+            self.url,
+            {
+                "email": "EXISTING@EXAMPLE.COM",
+                "password": "Strong-password-2026!",
+                "password_confirm": "Strong-password-2026!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
 
 class JWTAuthenticationTests(APITestCase):
     token_url = "/api/v1/accounts/login/"
@@ -179,6 +208,24 @@ class JWTAuthenticationTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
+
+    def test_login_uses_remote_addr_instead_of_forwarded_header(self):
+        response = self.client.post(
+            self.token_url,
+            {
+                "email": self.user.email,
+                "password": self.password,
+            },
+            format="json",
+            REMOTE_ADDR="192.0.2.10",
+            HTTP_X_FORWARDED_FOR="198.51.100.77",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        session = UserSession.objects.get(user=self.user)
+
+        self.assertEqual(session.ip_address, "192.0.2.10")
 
 
 class AccountEndpointTests(APITestCase):
@@ -654,15 +701,16 @@ class EmailVerificationTests(APITestCase):
         mail.outbox.clear()
 
     def test_registration_creates_unverified_user_and_sends_email(self):
-        response = self.client.post(
-            reverse("accounts_api_v1:register"),
-            {
-                "email": "newuser@example.com",
-                "password": "StrongPassword123!",
-                "password_confirm": "StrongPassword123!",
-            },
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/api/v1/accounts/register/",
+                {
+                    "email": "newuser@example.com",
+                    "password": "Strong-password-2026!",
+                    "password_confirm": "Strong-password-2026!",
+                },
+                format="json",
+            )
 
         self.assertEqual(response.status_code, 201)
 
